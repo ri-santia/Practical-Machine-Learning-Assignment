@@ -1,0 +1,171 @@
+---
+title: "Practical Machine Learning Week 4 Assignment - Predictions"
+author: "Ricardo Santiago"
+date: "8/21/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+In this assignment, we will explore the data sets collected by devices such as Jawbone, Nike FuelBand and Fitbit.
+The subject data movement activity is based on different accelerometers from 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. The goal of the analysis is to predict how well the activity was performed based on the accelerometer data in the test data set.
+
+A training data set is provided here: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+A test data is provided here: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+## Modeling and cross validation Methods
+
+We will sample a few prediction model methods to determine which is most accurate for predicting the test data.
+The training data will be subset into a training set and a validation set. Then we will generate different prediction models and use k-fold cross validation on the training  subset, and validate the results using the validation data set.
+Finally we will use the most accurate model to predict the activity performance based on the test data set.
+
+## Load libraries
+The following libraries will be loaded for modeling.
+
+```{r message=FALSE, warning=FALSE}
+library(AppliedPredictiveModeling)
+library(caret)
+library(ElemStatLearn) 
+library(pgmm) 
+library(rpart)
+library(gbm)
+library(randomForest)
+library(rattle)
+library(doParallel)
+```
+
+## Load Data
+
+```{r}
+trainFileURL<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testFileURL<- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+trainFile <- "pml-training.csv"
+testFile <- "pml-testing.csv"
+
+## Download if it is not already in the working directory
+if(!file.exists(trainFile)){
+  download.file(trainFileURL, trainFile, method="curl")
+}
+
+if(!file.exists(testFile)){
+  download.file(testFileURL, testFile, method="curl")
+}
+
+## Read data
+trainActivityData <- read.csv(trainFile, na.strings=c("NA","#DIV/0!", ""))
+testActivityData <- read.csv(testFile, na.strings=c("NA","#DIV/0!", ""))
+
+##Inspect Dataset
+str(trainActivityData)
+```
+
+## Clean Data
+Variables 1-7 are not necessary for the model so we remove them.
+```{r}
+trainActivityData <- trainActivityData[,-c(1:7)]
+testActivityData <- testActivityData[,-c(1:7)]
+```
+Remove records with NA values
+```{r}
+trainActivityData <- trainActivityData[,colSums(is.na(trainActivityData)) == 0]
+testActivityData <- testActivityData[,colSums(is.na(testActivityData)) == 0]
+```
+
+## Create data sets for training and validation
+```{r}
+##set classe as factor
+trainActivityData$classe <- as.factor(trainActivityData$classe)
+
+##create a training and validation dataset out of training data
+validateIdx <- createDataPartition(y=trainActivityData$classe, p=0.7, list=FALSE)
+
+newTrainData <- trainActivityData[validateIdx,]
+validateData <- trainActivityData[-validateIdx,]
+```
+
+## Set up seed and cross-validation method
+```{r}
+##set seed
+set.seed(23458)
+```
+
+Set up cross-validation using k-fold
+```{r}
+##set up training control to divide the data into 10 folds for training
+tr_control <- trainControl(method = "cv", number=10)
+```
+
+## Training models
+**1. Decision Trees**
+```{r}
+#Train model using Decision Trees
+modTRFit <- train(classe ~., method='rpart', data=newTrainData,trControl = tr_control)
+trPrediction <- predict(modTRFit, validateData)
+
+cMatrixTr <- confusionMatrix(trPrediction, validateData$classe)
+cMatrixTr
+```
+
+Accuracy for 'rpart' method
+```{r}
+cMatrixTr$overall[1]
+```
+Accuracy is 49% using decision trees.
+Prediction using the Tree model was not very accurate based on the validation data. 
+
+**2. Gradient Boosting**
+```{r}
+##Train model with boosting
+modGBMFit <- train(classe ~., method='gbm', data = newTrainData, trControl = tr_control, verbose = FALSE)
+gbmPrediction <- predict(modGBMFit, validateData)
+
+cMatrixgmb <- confusionMatrix(gbmPrediction, validateData$classe)
+cMatrixgmb
+```
+
+Accuracy for 'gmb' method
+```{r}
+cMatrixgmb$overall[1]
+```
+Accuracy is 96% using Gradient Boosting. Prediction using the Boosting model was much more accurate based on the validation data than compared to Trees.
+
+**3. Random Forests**
+```{r}
+##Train with Random Forest
+modRFFit <- train(classe ~., method='rf', data=newTrainData,trControl = tr_control, prox=TRUE, ntree=100, allowParallel=TRUE)
+rfPrediction <- predict(modRFFit, validateData)
+
+cMatrixRf <- confusionMatrix(rfPrediction, validateData$classe)
+cMatrixRf
+```
+Accuracy for 'rf' method
+```{r}
+cMatrixRf$overall[1]
+
+```
+Accuracy is 99% using Random Forests. 
+
+Prediction using the Random Forest model was the most accurate of the three models tested.
+
+## Prediction on test data set
+
+Since the Random Forest method yielded a 99% accuracy, we use it to predict on the test data set.
+```{r}
+##Predict using Rf model
+TestPrediction <- predict(modRFFit, testActivityData)
+
+TestPrediction
+
+predictionData <- testActivityData
+predictionData$classe <- TestPrediction
+```
+Prediction:
+```{r}
+predictionData [,c("problem_id","classe")]
+```
+
